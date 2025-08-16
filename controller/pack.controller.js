@@ -1,3 +1,4 @@
+const { default: mongoose } = require("mongoose");
 const PackModel = require("../model/pack.model");
 
 // 1️⃣ Create PO
@@ -192,6 +193,136 @@ exports.closeBox = async (req, res) => {
     res
       .status(500)
       .json({ message: "Error closing box", error: error.message });
+  }
+};
+
+// DELETE /api/pack/all
+exports.deleteAllPOs = async (req, res) => {
+  try {
+    await PackModel.deleteMany({});
+    res.status(200).json({ message: "All Purchase Orders deleted" });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Error deleting all POs", error: error.message });
+  }
+};
+
+// DELETE /api/pack/:poId
+exports.deletePOById = async (req, res) => {
+  try {
+    const { poId } = req.params;
+    const deleted = await PackModel.findByIdAndDelete(poId);
+    if (!deleted) {
+      return res.status(404).json({ message: "PO not found" });
+    }
+    res.status(200).json({ message: "PO deleted successfully", data: deleted });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Error deleting PO", error: error.message });
+  }
+};
+
+exports.deleteBoxById = async (req, res) => {
+  try {
+    const { poId, boxId } = req.params;
+
+    // Validate ObjectIds
+    if (!mongoose.Types.ObjectId.isValid(poId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Purchase Order ID format",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(boxId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Box ID format",
+      });
+    }
+
+    // Find the PO and check if it exists
+    const po = await PackModel.findById(poId);
+    if (!po) {
+      return res.status(404).json({
+        success: false,
+        message: "Purchase Order not found",
+      });
+    }
+
+    // Check if the box exists in the PO
+    const box = po.boxes.id(boxId);
+    if (!box) {
+      return res.status(404).json({
+        success: false,
+        message: "Box not found in this Purchase Order",
+      });
+    }
+
+    if (box.items && box.items.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete a box containing items",
+      });
+    }
+
+    // Remove the box from the boxes array
+    po.boxes.pull({ _id: boxId });
+    await po.save();
+
+    // Success response
+    res.status(200).json({
+      success: true,
+      message: "Box deleted successfully",
+      data: box,
+    });
+  } catch (error) {
+    // Log the error for debugging (optional, configure based on your logging setup)
+    console.error("Error deleting box:", error);
+
+    // Return server error
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete box",
+      error: error.message,
+    });
+  }
+};
+
+// PUT /api/pack/:poId/box/:boxId/item/:itemId
+exports.updateItemInBox = async (req, res) => {
+  try {
+    const { poId, boxId, itemId } = req.params;
+    const { sku, quantity } = req.body;
+    if (!sku && typeof quantity === "undefined") {
+      return res
+        .status(400)
+        .json({ message: "Nothing to update (sku or quantity required)" });
+    }
+
+    const pack = await PackModel.findById(poId);
+    if (!pack) return res.status(404).json({ message: "PO not found" });
+
+    const box = pack.boxes.id(boxId);
+    if (!box) return res.status(404).json({ message: "Box not found" });
+
+    const item = box.items.id(itemId);
+    if (!item) return res.status(404).json({ message: "Item not found" });
+
+    if (sku) item.sku = sku;
+    if (typeof quantity !== "undefined") item.quantity = quantity;
+
+    pack.updatedDate = new Date().toISOString().split("T")[0];
+    pack.updatedTime = new Date().toTimeString().split(" ")[0]; // Fixed line
+
+    await pack.save();
+    res.status(200).json({ message: "Item updated successfully", data: pack });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Error updating item", error: error.message });
   }
 };
 
